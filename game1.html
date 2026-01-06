@@ -1,0 +1,872 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Neon Rogue: Multiplayer ARPG</title>
+    
+    <!-- Dependencies via CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+    <script src="https://unpkg.com/peerjs@1.5.1/dist/peerjs.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #1a1a1a;
+            color: #efefef;
+            font-family: 'Press Start 2P', cursive;
+            overflow: hidden;
+            touch-action: none; /* Prevent mobile scroll */
+        }
+
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* Let clicks pass through to canvas */
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 10;
+        }
+
+        .interactive {
+            pointer-events: auto;
+        }
+
+        /* Retro CRT Effect Overlay */
+        #crt-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            background-size: 100% 2px, 3px 100%;
+            pointer-events: none;
+            z-index: 999;
+        }
+
+        .pixel-corners {
+            border: 4px solid #4ade80;
+            box-shadow: 0 0 10px #4ade80, inset 0 0 10px #4ade80;
+            image-rendering: pixelated;
+        }
+
+        .hud-text {
+            text-shadow: 2px 2px 0px #000;
+        }
+
+        #game-container {
+            width: 100vw;
+            height: 100vh;
+        }
+
+        /* Loading Spinner */
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- CRT Scanline Effect -->
+    <div id="crt-overlay"></div>
+
+    <!-- UI Overlay -->
+    <div id="ui-layer">
+        
+        <!-- Main Menu -->
+        <div id="menu-screen" class="interactive bg-gray-900 p-8 border-4 border-green-500 rounded max-w-lg text-center shadow-2xl">
+            <h1 class="text-4xl text-green-400 mb-6 drop-shadow-md">NEON RIFT</h1>
+            
+            <div class="mb-4">
+                <label class="block text-xs text-gray-400 mb-2">OPERATOR NAME</label>
+                <input type="text" id="player-name" class="bg-gray-800 text-white p-3 w-full border-2 border-gray-600 focus:border-green-400 outline-none font-sans" placeholder="Enter Name" maxlength="10">
+            </div>
+
+            <div class="flex gap-4 justify-center mt-6">
+                <button id="btn-host" class="bg-green-600 hover:bg-green-500 text-black py-3 px-6 border-b-4 border-green-800 active:border-b-0 active:translate-y-1 transition-all">
+                    HOST GAME
+                </button>
+                <button id="btn-join" class="bg-blue-600 hover:bg-blue-500 text-white py-3 px-6 border-b-4 border-blue-800 active:border-b-0 active:translate-y-1 transition-all">
+                    JOIN GAME
+                </button>
+            </div>
+
+            <div id="join-input-container" class="hidden mt-4">
+                <input type="text" id="room-code-input" class="bg-gray-800 text-white p-3 w-full border-2 border-blue-400 outline-none font-sans mb-2" placeholder="Paste Room Code Here">
+                <button id="btn-connect" class="w-full bg-blue-700 hover:bg-blue-600 text-white py-2">CONNECT</button>
+            </div>
+
+            <p id="status-msg" class="text-xs text-yellow-400 mt-4 min-h-[1.5em]"></p>
+        </div>
+
+        <!-- Lobby / Waiting Screen -->
+        <div id="lobby-screen" class="interactive hidden bg-gray-900 p-8 border-4 border-yellow-500 rounded text-center">
+            <h2 class="text-2xl text-yellow-400 mb-4">LOBBY</h2>
+            <div class="bg-black p-4 mb-4 border border-gray-700 select-all cursor-pointer" id="room-code-display" title="Click to Copy">
+                Loading Code...
+            </div>
+            <p class="text-xs text-gray-400 mb-6">Share this code with your ally.</p>
+            <div id="player-list" class="text-left text-sm mb-6 space-y-2">
+                <!-- Players injected here -->
+            </div>
+            <button id="btn-start" class="hidden w-full bg-green-600 hover:bg-green-500 text-black py-3 border-b-4 border-green-800 active:border-b-0">
+                START MISSION
+            </button>
+            <p id="waiting-msg" class="text-xs text-gray-500 mt-2">Waiting for host to start...</p>
+        </div>
+
+        <!-- In-Game HUD -->
+        <div id="hud-screen" class="hidden w-full h-full p-4 flex flex-col justify-between">
+            <div class="flex justify-between items-start">
+                <!-- P1 Health -->
+                <div class="hud-text">
+                    <div class="text-green-400 text-sm mb-1" id="p1-name">P1</div>
+                    <div class="w-48 h-4 bg-gray-800 border-2 border-white relative">
+                        <div id="p1-hp-bar" class="h-full bg-green-500 transition-all duration-200" style="width: 100%"></div>
+                    </div>
+                </div>
+                
+                <!-- Wave Info -->
+                <div class="text-center">
+                    <div class="text-xs text-gray-400">WAVE</div>
+                    <div id="wave-display" class="text-3xl text-white">1</div>
+                    <div id="enemy-count" class="text-xs text-red-400 mt-1">0 ENEMIES</div>
+                </div>
+
+                <!-- P2 Health -->
+                <div class="hud-text text-right" id="p2-hud" style="opacity: 0.5">
+                    <div class="text-blue-400 text-sm mb-1" id="p2-name">DISCONNECTED</div>
+                    <div class="w-48 h-4 bg-gray-800 border-2 border-white relative ml-auto">
+                        <div id="p2-hp-bar" class="h-full bg-blue-500 transition-all duration-200" style="width: 100%"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- EXP / Level Up Notification -->
+            <div id="notification-area" class="text-center pointer-events-none"></div>
+        </div>
+    </div>
+
+    <!-- Phaser Game Container -->
+    <div id="game-container"></div>
+
+    <script>
+        // ==========================================
+        // CONFIG & CONSTANTS
+        // ==========================================
+        const GAME_WIDTH = window.innerWidth;
+        const GAME_HEIGHT = window.innerHeight;
+        const TILE_SIZE = 32;
+        const SYNC_RATE = 50; // ms between network updates (20 ticks/sec)
+        
+        // ==========================================
+        // ASSET GENERATION (PROCEDURAL)
+        // ==========================================
+        // We generate textures programmatically to avoid external dependency 404s
+        
+        function generateTextures(scene) {
+            // 1. Player Texture (Hero) - A simple styled knight/robot
+            const playerGraphics = scene.make.graphics({ x: 0, y: 0, add: false });
+            
+            // Body
+            playerGraphics.fillStyle(0x333333);
+            playerGraphics.fillRect(8, 8, 16, 20);
+            // Armor
+            playerGraphics.fillStyle(0x4ade80); // Green for P1
+            playerGraphics.fillRect(8, 12, 16, 12);
+            // Visor
+            playerGraphics.fillStyle(0x00ff00);
+            playerGraphics.fillRect(10, 10, 12, 4);
+            
+            playerGraphics.generateTexture('player_p1', 32, 32);
+
+            // P2 Texture (Blue)
+            playerGraphics.clear();
+            playerGraphics.fillStyle(0x333333);
+            playerGraphics.fillRect(8, 8, 16, 20);
+            playerGraphics.fillStyle(0x3b82f6); // Blue for P2
+            playerGraphics.fillRect(8, 12, 16, 12);
+            playerGraphics.fillStyle(0x60a5fa);
+            playerGraphics.fillRect(10, 10, 12, 4);
+            playerGraphics.generateTexture('player_p2', 32, 32);
+
+            // 2. Enemy Texture (Red Blob)
+            const enemyGraphics = scene.make.graphics({ x: 0, y: 0, add: false });
+            enemyGraphics.fillStyle(0xef4444);
+            enemyGraphics.fillCircle(16, 16, 12);
+            enemyGraphics.fillStyle(0x7f1d1d);
+            enemyGraphics.fillCircle(12, 14, 3); // Eye
+            enemyGraphics.fillCircle(20, 14, 3); // Eye
+            enemyGraphics.generateTexture('enemy_basic', 32, 32);
+
+            // 3. Sword Swing (Arc)
+            const slashGraphics = scene.make.graphics({x:0, y:0, add:false});
+            slashGraphics.lineStyle(3, 0xffffff, 1);
+            slashGraphics.beginPath();
+            slashGraphics.arc(32, 32, 28, Phaser.Math.DegToRad(220), Phaser.Math.DegToRad(320));
+            slashGraphics.strokePath();
+            slashGraphics.generateTexture('slash', 64, 64);
+
+            // 4. Bullet / Projectile
+            const bulletGraphics = scene.make.graphics({x:0, y:0, add:false});
+            bulletGraphics.fillStyle(0xffff00);
+            bulletGraphics.fillCircle(4,4,4);
+            bulletGraphics.generateTexture('bullet', 8, 8);
+
+            // 5. Floor Tile (Grid)
+            const floorGraphics = scene.make.graphics({x:0, y:0, add: false});
+            floorGraphics.lineStyle(1, 0x333333);
+            floorGraphics.strokeRect(0, 0, 64, 64);
+            floorGraphics.generateTexture('floor', 64, 64);
+
+            // 6. Particle (Glow)
+            const particleGraphics = scene.make.graphics({x:0, y:0, add:false});
+            particleGraphics.fillStyle(0xffffff);
+            particleGraphics.fillCircle(4,4,4);
+            particleGraphics.generateTexture('particle', 8, 8);
+        }
+
+        // ==========================================
+        // NETWORKING (PEERJS)
+        // ==========================================
+        class NetworkManager {
+            constructor() {
+                this.peer = null;
+                this.conn = null;
+                this.isHost = false;
+                this.myId = null;
+                this.connected = false;
+                
+                // Queues
+                this.incomingPackets = [];
+            }
+
+            init(name, isHost, targetId = null) {
+                this.isHost = isHost;
+                // Generate a random shorter ID for convenience if hosting
+                // Note: PeerJS IDs must be strings. 
+                const id = isHost ? 'neorogue-' + Math.random().toString(36).substr(2, 5) : null;
+                
+                this.peer = new Peer(id, {
+                    debug: 1
+                });
+
+                return new Promise((resolve, reject) => {
+                    this.peer.on('open', (id) => {
+                        this.myId = id;
+                        console.log('My Peer ID:', id);
+
+                        if (isHost) {
+                            // Wait for connection
+                            this.peer.on('connection', (conn) => {
+                                this.setupConnection(conn);
+                            });
+                            resolve(id);
+                        } else {
+                            // Connect to host
+                            const conn = this.peer.connect(targetId);
+                            conn.on('open', () => {
+                                this.setupConnection(conn);
+                                // Send handshake
+                                this.send({ type: 'handshake', name: name });
+                                resolve(id);
+                            });
+                            conn.on('error', (err) => reject(err));
+                        }
+                    });
+
+                    this.peer.on('error', (err) => {
+                        console.error(err);
+                        reject(err);
+                    });
+                });
+            }
+
+            setupConnection(conn) {
+                this.conn = conn;
+                this.connected = true;
+                
+                conn.on('data', (data) => {
+                    this.incomingPackets.push(data);
+                });
+
+                conn.on('close', () => {
+                    this.connected = false;
+                    alert("Connection lost!");
+                    location.reload();
+                });
+
+                console.log("Connected to peer!");
+            }
+
+            send(data) {
+                if (this.connected && this.conn) {
+                    this.conn.send(data);
+                }
+            }
+        }
+
+        const net = new NetworkManager();
+        let globalPlayerName = "Player";
+
+        // ==========================================
+        // GAME LOGIC (PHASER SCENE)
+        // ==========================================
+        
+        class GameScene extends Phaser.Scene {
+            constructor() {
+                super({ key: 'GameScene' });
+            }
+
+            preload() {
+                // No external assets to load here, we generate them in create()
+            }
+
+            create() {
+                // 1. Generate Assets
+                generateTextures(this);
+
+                // 2. Setup World
+                this.createWorld();
+
+                // 3. Setup Inputs
+                this.cursors = this.input.keyboard.createCursorKeys();
+                this.wasd = this.input.keyboard.addKeys({
+                    up: Phaser.Input.Keyboard.KeyCodes.W,
+                    down: Phaser.Input.Keyboard.KeyCodes.S,
+                    left: Phaser.Input.Keyboard.KeyCodes.A,
+                    right: Phaser.Input.Keyboard.KeyCodes.D
+                });
+
+                this.input.on('pointerdown', (pointer) => {
+                    this.doAttack(pointer);
+                });
+
+                // 4. Setup Entities
+                this.players = {}; // Key: 'host' or 'client'
+                this.enemies = this.physics.add.group();
+                this.projectiles = this.physics.add.group();
+                
+                // Create local player
+                this.myRole = net.isHost ? 'host' : 'client';
+                this.players[this.myRole] = this.createPlayer(400, 300, this.myRole, globalPlayerName);
+
+                // If host, logic to spawn enemies
+                if (net.isHost) {
+                    this.wave = 0;
+                    this.enemySpawnTimer = 0;
+                    this.gameState = {
+                        players: {},
+                        enemies: [],
+                        wave: 1
+                    };
+                    this.startWave(1);
+                } else {
+                    // Create dummy remote player until sync
+                    this.players['host'] = this.createPlayer(-100, -100, 'host', 'Host');
+                }
+
+                // 5. Setup Collisions
+                this.physics.add.collider(this.players[this.myRole], this.enemies, this.handlePlayerHit, null, this);
+                this.physics.add.overlap(this.projectiles, this.enemies, this.handleProjectileHit, null, this);
+
+                // 6. Networking Timer
+                this.lastSync = 0;
+
+                // 7. Camera
+                this.cameras.main.startFollow(this.players[this.myRole]);
+                this.cameras.main.setZoom(1.2);
+
+                // Particles
+                this.createParticleManagers();
+            }
+
+            createWorld() {
+                // Draw a grid background
+                const width = 2000;
+                const height = 2000;
+                this.add.tileSprite(0, 0, width, height, 'floor').setOrigin(0.5, 0.5).setAlpha(0.2);
+                this.physics.world.setBounds(-width/2, -height/2, width, height);
+            }
+
+            createPlayer(x, y, role, name) {
+                const texture = role === 'host' ? 'player_p1' : 'player_p2';
+                const p = this.physics.add.sprite(x, y, texture);
+                p.setCollideWorldBounds(true);
+                p.hp = 100;
+                p.maxHp = 100;
+                p.role = role;
+                
+                // Name Tag
+                const nameText = this.add.text(0, -25, name, {
+                    fontFamily: '"Press Start 2P"',
+                    fontSize: '10px',
+                    fill: '#ffffff'
+                }).setOrigin(0.5);
+                
+                p.nameTag = nameText;
+                p.container = this.add.container(x, y, [nameText]); // Keep tag with player
+                
+                return p;
+            }
+
+            createParticleManagers() {
+                this.bloodParticles = this.add.particles(0, 0, 'particle', {
+                    speed: { min: 50, max: 150 },
+                    scale: { start: 1, end: 0 },
+                    lifespan: 300,
+                    blendMode: 'ADD',
+                    tint: 0xff0000,
+                    emitting: false
+                });
+            }
+
+            startWave(num) {
+                this.wave = num;
+                document.getElementById('wave-display').innerText = num;
+                this.enemiesToSpawn = 5 + (num * 2);
+                
+                // Show notification
+                const notif = document.getElementById('notification-area');
+                notif.innerHTML = `<h2 class="text-yellow-400 text-2xl drop-shadow">WAVE ${num} STARTED</h2>`;
+                notif.style.opacity = 1;
+                setTimeout(() => notif.style.opacity = 0, 2000);
+            }
+
+            update(time, delta) {
+                // 1. Process Network Packets
+                this.processNetworkEvents();
+
+                // 2. Local Player Movement
+                const myPlayer = this.players[this.myRole];
+                if (myPlayer.active) {
+                    const speed = 200;
+                    myPlayer.setVelocity(0);
+
+                    if (this.cursors.left.isDown || this.wasd.left.isDown) myPlayer.setVelocityX(-speed);
+                    else if (this.cursors.right.isDown || this.wasd.right.isDown) myPlayer.setVelocityX(speed);
+
+                    if (this.cursors.up.isDown || this.wasd.up.isDown) myPlayer.setVelocityY(-speed);
+                    else if (this.cursors.down.isDown || this.wasd.down.isDown) myPlayer.setVelocityY(speed);
+
+                    // Sync nametag position
+                    myPlayer.nameTag.setPosition(myPlayer.x, myPlayer.y - 30);
+                }
+
+                // 3. Host Logic (AI & Game State)
+                if (net.isHost) {
+                    this.updateHostLogic(time, delta);
+                }
+
+                // 4. Send State
+                if (time > this.lastSync + SYNC_RATE) {
+                    this.broadcastState();
+                    this.lastSync = time;
+                }
+
+                // 5. Interpolate Remote Entities
+                this.interpolateEntities(delta);
+            }
+
+            doAttack(pointer) {
+                const p = this.players[this.myRole];
+                if(!p.active) return;
+
+                // Visuals
+                const slash = this.add.sprite(p.x, p.y, 'slash');
+                const angle = Phaser.Math.Angle.Between(p.x, p.y, pointer.worldX, pointer.worldY);
+                slash.setRotation(angle + 1.57); // adjust for graphic
+                slash.playAfterDelay({ alpha: 0 }, 200);
+                
+                this.tweens.add({
+                    targets: slash,
+                    alpha: 0,
+                    duration: 150,
+                    onComplete: () => slash.destroy()
+                });
+
+                // Screen Shake (Juice)
+                this.cameras.main.shake(50, 0.005);
+
+                // Logic
+                if (net.isHost) {
+                    // Check hits immediately
+                    this.checkAttackHit(p, angle);
+                } else {
+                    // Tell host we attacked
+                    net.send({ type: 'input_attack', angle: angle, x: p.x, y: p.y });
+                }
+            }
+
+            checkAttackHit(attacker, angle) {
+                // Simple cone check or distance check
+                const reach = 60;
+                this.enemies.getChildren().forEach(enemy => {
+                    const dist = Phaser.Math.Distance.Between(attacker.x, attacker.y, enemy.x, enemy.y);
+                    if (dist < reach) {
+                        this.damageEnemy(enemy, 25);
+                    }
+                });
+            }
+
+            damageEnemy(enemy, amount) {
+                enemy.hp -= amount;
+                
+                // Hit Stop (Juice)
+                this.physics.world.timeScale = 0.5;
+                this.time.delayedCall(50, () => this.physics.world.timeScale = 1);
+
+                // Visual Feedback
+                this.showFloatingText(enemy.x, enemy.y, amount.toString(), '#ff0000');
+                this.bloodParticles.emitParticleAt(enemy.x, enemy.y, 5);
+
+                if (enemy.hp <= 0) {
+                    enemy.destroy();
+                    // Check wave clear
+                    if (this.enemies.countActive() === 0 && this.enemiesToSpawn <= 0) {
+                        this.time.delayedCall(2000, () => this.startWave(this.wave + 1));
+                    }
+                }
+            }
+
+            spawnEnemy() {
+                // Random edge spawn
+                const angle = Math.random() * Math.PI * 2;
+                const r = 600;
+                const x = this.players.host.x + Math.cos(angle) * r;
+                const y = this.players.host.y + Math.sin(angle) * r;
+
+                const e = this.physics.add.sprite(x, y, 'enemy_basic');
+                this.enemies.add(e);
+                e.hp = 50 + (this.wave * 10);
+                e.id = Math.random().toString(36).substr(2, 9); // unique id for sync
+            }
+
+            updateHostLogic(time, delta) {
+                // Spawn Enemies
+                if (this.enemiesToSpawn > 0 && this.enemies.countActive() < 10 + this.wave) {
+                    if (Math.random() < 0.02) {
+                        this.spawnEnemy();
+                        this.enemiesToSpawn--;
+                        document.getElementById('enemy-count').innerText = `${this.enemies.countActive() + this.enemiesToSpawn} ENEMIES LEFT`;
+                    }
+                }
+
+                // AI Follow
+                this.enemies.getChildren().forEach(e => {
+                    // Find nearest player
+                    let target = this.players.host;
+                    let distHost = Phaser.Math.Distance.Between(e.x, e.y, this.players.host.x, this.players.host.y);
+                    
+                    if (this.players.client && this.players.client.active) {
+                        let distClient = Phaser.Math.Distance.Between(e.x, e.y, this.players.client.x, this.players.client.y);
+                        if (distClient < distHost) target = this.players.client;
+                    }
+
+                    this.physics.moveToObject(e, target, 80 + (this.wave * 5));
+                });
+            }
+
+            broadcastState() {
+                if (!net.isHost) {
+                    // Client: Send only my position
+                    net.send({
+                        type: 'client_update',
+                        x: this.players.client.x,
+                        y: this.players.client.y,
+                        hp: this.players.client.hp
+                    });
+                    return;
+                }
+
+                // Host: Send EVERYTHING
+                const enemyData = [];
+                this.enemies.getChildren().forEach(e => {
+                    enemyData.push({ id: e.id, x: Math.round(e.x), y: Math.round(e.y), hp: e.hp });
+                });
+
+                const state = {
+                    type: 'gamestate',
+                    p1: { x: Math.round(this.players.host.x), y: Math.round(this.players.host.y), hp: this.players.host.hp },
+                    enemies: enemyData,
+                    wave: this.wave
+                };
+
+                if (this.players.client && this.players.client.active) {
+                    state.p2 = { hp: this.players.client.hp }; // Host validates P2 HP
+                }
+
+                net.send(state);
+            }
+
+            processNetworkEvents() {
+                while (net.incomingPackets.length > 0) {
+                    const packet = net.incomingPackets.shift();
+
+                    if (net.isHost) {
+                        if (packet.type === 'handshake') {
+                            this.handlePlayerJoin(packet.name);
+                        } else if (packet.type === 'client_update') {
+                            if (this.players.client) {
+                                this.players.client.targetX = packet.x;
+                                this.players.client.targetY = packet.y;
+                            }
+                        } else if (packet.type === 'input_attack') {
+                            // Remote player attacked
+                            // Show visuals locally
+                            const p = this.players.client;
+                            const slash = this.add.sprite(packet.x, packet.y, 'slash');
+                            slash.setRotation(packet.angle + 1.57);
+                            this.tweens.add({ targets: slash, alpha: 0, duration: 150, onComplete: () => slash.destroy() });
+                            
+                            // Calculate logic
+                            this.checkAttackHit(p, packet.angle);
+                        }
+                    } else {
+                        // CLIENT LOGIC
+                        if (packet.type === 'gamestate') {
+                            // Update Host Pos
+                            this.players.host.targetX = packet.p1.x;
+                            this.players.host.targetY = packet.p1.y;
+                            this.updateHealthUI(packet.p1.hp, this.players.client.hp); // Assuming client knows own HP, but host authorizes
+                            
+                            // Sync Enemies
+                            this.syncEnemies(packet.enemies);
+                            
+                            // Update Wave
+                            if (this.wave !== packet.wave) {
+                                this.startWave(packet.wave);
+                            }
+                        }
+                    }
+                }
+            }
+
+            handlePlayerJoin(name) {
+                console.log("Player joined:", name);
+                this.players.client = this.createPlayer(400, 400, 'client', name);
+                document.getElementById('p2-name').innerText = name;
+                document.getElementById('p2-hud').style.opacity = 1;
+                // Send immediate sync
+                this.broadcastState();
+            }
+
+            syncEnemies(serverEnemies) {
+                // Very basic reconciliation
+                const serverIds = new Set(serverEnemies.map(e => e.id));
+                
+                // 1. Update or Create
+                serverEnemies.forEach(sEnv => {
+                    const local = this.enemies.getChildren().find(e => e.id === sEnv.id);
+                    if (local) {
+                        local.targetX = sEnv.x;
+                        local.targetY = sEnv.y;
+                        if (local.hp > sEnv.hp) {
+                             // Flash white if damaged
+                             this.tweens.add({ targets: local, alpha: 0.5, yoyo: true, duration: 50 });
+                        }
+                        local.hp = sEnv.hp;
+                    } else {
+                        // Create new
+                        const e = this.physics.add.sprite(sEnv.x, sEnv.y, 'enemy_basic');
+                        e.id = sEnv.id;
+                        e.hp = sEnv.hp;
+                        this.enemies.add(e);
+                    }
+                });
+
+                // 2. Destroy missing
+                this.enemies.getChildren().forEach(e => {
+                    if (!serverIds.has(e.id)) {
+                        // Death effect
+                        this.bloodParticles.emitParticleAt(e.x, e.y, 5);
+                        e.destroy();
+                    }
+                });
+            }
+
+            interpolateEntities(delta) {
+                const t = 0.2; // Lerp factor
+
+                // Remote players
+                const remoteRole = net.isHost ? 'client' : 'host';
+                const remoteP = this.players[remoteRole];
+                if (remoteP && remoteP.active && remoteP.targetX !== undefined) {
+                    remoteP.x = Phaser.Math.Linear(remoteP.x, remoteP.targetX, t);
+                    remoteP.y = Phaser.Math.Linear(remoteP.y, remoteP.targetY, t);
+                    remoteP.nameTag.setPosition(remoteP.x, remoteP.y - 30);
+                }
+
+                // Remote Enemies (Client only)
+                if (!net.isHost) {
+                    this.enemies.getChildren().forEach(e => {
+                        if (e.targetX !== undefined) {
+                            e.x = Phaser.Math.Linear(e.x, e.targetX, t);
+                            e.y = Phaser.Math.Linear(e.y, e.targetY, t);
+                        }
+                    });
+                }
+            }
+
+            handlePlayerHit(player, enemy) {
+                if (!net.isHost) return; // Only host calculates damage
+
+                if (player.alpha === 1) { // Not invulnerable
+                    player.hp -= 10;
+                    
+                    // Invulnerability frames
+                    player.alpha = 0.5;
+                    this.time.delayedCall(1000, () => player.alpha = 1);
+                    
+                    // Screen shake
+                    this.cameras.main.shake(100, 0.01);
+                    
+                    // Notify UI
+                    this.updateHealthUI(this.players.host.hp, this.players.client ? this.players.client.hp : 0);
+
+                    if (player.hp <= 0) {
+                        // Game Over logic would go here
+                        this.showFloatingText(player.x, player.y, "DEAD", "#ff0000");
+                    }
+                }
+            }
+
+            updateHealthUI(p1Hp, p2Hp) {
+                document.getElementById('p1-hp-bar').style.width = Math.max(0, p1Hp) + '%';
+                document.getElementById('p2-hp-bar').style.width = Math.max(0, p2Hp) + '%';
+            }
+
+            showFloatingText(x, y, message, color) {
+                const text = this.add.text(x, y - 20, message, {
+                    fontFamily: '"Press Start 2P"',
+                    fontSize: '14px',
+                    fill: color,
+                    stroke: '#000',
+                    strokeThickness: 2
+                }).setOrigin(0.5);
+
+                this.tweens.add({
+                    targets: text,
+                    y: y - 50,
+                    alpha: 0,
+                    duration: 800,
+                    onComplete: () => text.destroy()
+                });
+            }
+        }
+
+        // ==========================================
+        // UI HANDLERS & BOOT
+        // ==========================================
+        
+        const ui = {
+            menu: document.getElementById('menu-screen'),
+            lobby: document.getElementById('lobby-screen'),
+            hud: document.getElementById('hud-screen'),
+            nameInput: document.getElementById('player-name'),
+            joinContainer: document.getElementById('join-input-container'),
+            status: document.getElementById('status-msg'),
+            roomDisplay: document.getElementById('room-code-display')
+        };
+
+        // Button Listeners
+        document.getElementById('btn-host').onclick = async () => {
+            const name = ui.nameInput.value || "Host";
+            globalPlayerName = name;
+            ui.status.innerText = "Initializing Comms...";
+            
+            try {
+                const id = await net.init(name, true);
+                ui.menu.classList.add('hidden');
+                ui.lobby.classList.remove('hidden');
+                ui.roomDisplay.innerText = id;
+                document.getElementById('player-list').innerHTML = `<div class="text-green-400">> ${name} (You)</div>`;
+                document.getElementById('btn-start').classList.remove('hidden');
+                document.getElementById('waiting-msg').classList.add('hidden');
+            } catch (e) {
+                ui.status.innerText = "Error: " + e.message;
+            }
+        };
+
+        document.getElementById('btn-join').onclick = () => {
+            ui.joinContainer.classList.remove('hidden');
+            document.getElementById('btn-host').classList.add('hidden');
+            document.getElementById('btn-join').classList.add('bg-blue-800');
+        };
+
+        document.getElementById('btn-connect').onclick = async () => {
+            const name = ui.nameInput.value || "Guest";
+            const code = document.getElementById('room-code-input').value.trim();
+            if(!code) return;
+
+            globalPlayerName = name;
+            ui.status.innerText = "Connecting to Host...";
+
+            try {
+                const id = await net.init(name, false, code);
+                ui.menu.classList.add('hidden');
+                ui.hud.classList.remove('hidden');
+                startGame(); // Client starts immediately, waiting for data
+            } catch (e) {
+                ui.status.innerText = "Connection Failed: " + e.message;
+            }
+        };
+
+        // Host Start Button
+        document.getElementById('btn-start').onclick = () => {
+            // Signal start to peer? In this simple version, peer joins running game.
+            ui.lobby.classList.add('hidden');
+            ui.hud.classList.remove('hidden');
+            startGame();
+        };
+
+        // Copy Code
+        ui.roomDisplay.onclick = () => {
+            const code = ui.roomDisplay.innerText;
+            navigator.clipboard.writeText(code).then(() => {
+                alert("Room Code copied to clipboard!");
+            });
+        };
+
+        function startGame() {
+            const config = {
+                type: Phaser.AUTO,
+                parent: 'game-container',
+                width: GAME_WIDTH,
+                height: GAME_HEIGHT,
+                physics: {
+                    default: 'arcade',
+                    arcade: {
+                        gravity: { y: 0 },
+                        debug: false
+                    }
+                },
+                pixelArt: true, // Crucial for retro feel
+                scene: GameScene
+            };
+            new Phaser.Game(config);
+        }
+
+    </script>
+</body>
+</html>
