@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dungeon Brawl: Multiplayer Action RPG</title>
+    <!-- CDN Dependencies -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.4.0/pixi.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/howler/2.2.4/howler.min.js"></script>
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+    <style>
+        canvas { display: block; margin: auto; }
+        #gameCanvas { border: 2px solid #4a5568; background: #1a202c; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white p-4">
+    <div class="max-w-6xl mx-auto">
+        <!-- Header -->
+        <header class="text-center mb-6">
+            <h1 class="text-4xl font-bold text-yellow-400 mb-2">Dungeon Brawl</h1>
+            <p class="text-gray-300">A real-time multiplayer action RPG. Fight waves of enemies with a friend!</p>
+        </header>
+
+        <!-- Main Container: Room UI & Game Canvas -->
+        <main>
+            <!-- Room Connection UI -->
+            <div id="roomUI" class="bg-gray-800 p-6 rounded-xl shadow-2xl mb-6">
+                <h2 class="text-2xl font-semibold mb-4">Enter the Dungeon</h2>
+                <div class="flex flex-col md:flex-row gap-4 items-center">
+                    <input type="text" id="roomCodeInput" placeholder="e.g., dragon123"
+                           class="flex-grow p-3 rounded-lg bg-gray-700 border border-gray-600 focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
+                           value="dungeon1">
+                    <button id="joinRoomBtn"
+                            class="px-8 py-3 bg-green-600 hover:bg-green-700 rounded-lg font-bold text-lg transition-colors">
+                        Join Room
+                    </button>
+                    <button id="createRoomBtn"
+                            class="px-8 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg font-bold text-lg transition-colors">
+                        Create New Room
+                    </button>
+                </div>
+                <div id="roomStatus" class="mt-4 p-3 rounded-lg bg-gray-700 hidden">
+                    <p class="font-mono">Status: <span id="statusText">Disconnected</span></p>
+                    <p class="text-sm text-gray-300">Share the Room Code with a friend to play together.</p>
+                </div>
+            </div>
+
+            <!-- Game Canvas Container -->
+            <div id="gameContainer" class="hidden">
+                <div class="flex flex-wrap justify-between items-center mb-4 bg-gray-800 p-4 rounded-xl">
+                    <div class="flex items-center space-x-6">
+                        <div>
+                            <span class="text-gray-400">Wave:</span>
+                            <span id="waveCount" class="text-2xl font-bold ml-2">1</span>
+                        </div>
+                        <div>
+                            <span class="text-gray-400">Enemies:</span>
+                            <span id="enemyCount" class="text-2xl font-bold ml-2">0</span>
+                        </div>
+                        <div>
+                            <span class="text-gray-400">Players:</span>
+                            <span id="playerCount" class="text-2xl font-bold ml-2">0/2</span>
+                        </div>
+                    </div>
+                    <div class="text-right">
+                        <div class="text-lg">
+                            <span class="text-gray-400">Your Health:</span>
+                            <span id="healthDisplay" class="font-bold">100</span>/<span id="maxHealthDisplay">100</span>
+                        </div>
+                        <div class="text-lg">
+                            <span class="text-gray-400">Level:</span>
+                            <span id="levelDisplay" class="font-bold">1</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Pixi.js Canvas will be inserted here -->
+                <div id="canvasWrapper" class="relative">
+                    <canvas id="gameCanvas"></canvas>
+                    <div id="gameOverlay" class="absolute inset-0 flex items-center justify-center hidden">
+                        <div class="bg-gray-900/90 p-8 rounded-2xl text-center">
+                            <h2 class="text-3xl font-bold text-red-400 mb-2" id="overlayTitle">Game Over</h2>
+                            <p class="text-xl mb-4" id="overlayMessage">You were defeated!</p>
+                            <button id="restartBtn" class="px-6 py-3 bg-yellow-600 hover:bg-yellow-700 rounded-lg font-bold">
+                                Return to Lobby
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Controls Guide -->
+                <div class="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="bg-gray-800 p-4 rounded-xl">
+                        <h3 class="text-lg font-semibold text-yellow-300 mb-2">Controls</h3>
+                        <ul class="space-y-1">
+                            <li><kbd class="bg-gray-700 px-2 py-1 rounded">A</kbd> / <kbd class="bg-gray-700 px-2 py-1 rounded">←</kbd> Move Left</li>
+                            <li><kbd class="bg-gray-700 px-2 py-1 rounded">D</kbd> / <kbd class="bg-gray-700 px-2 py-1 rounded">→</kbd> Move Right</li>
+                            <li><kbd class="bg-gray-700 px-2 py-1 rounded">W</kbd> / <kbd class="bg-gray-700 px-2 py-1 rounded">Space</kbd> Jump</li>
+                            <li><kbd class="bg-gray-700 px-2 py-1 rounded">J</kbd> / <kbd class="bg-gray-700 px-2 py-1 rounded">Left Click</kbd> Attack</li>
+                        </ul>
+                    </div>
+                    <div class="bg-gray-800 p-4 rounded-xl">
+                        <h3 class="text-lg font-semibold text-yellow-300 mb-2">Multiplayer Info</h3>
+                        <p class="text-gray-300">Room: <span id="currentRoomCode" class="font-mono font-bold">---</span></p>
+                        <p class="text-gray-300">Role: <span id="peerRole" class="font-bold">---</span></p>
+                        <p class="text-sm text-gray-400 mt-2">Both players share the same dungeon. The host manages enemies.</p>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer class="mt-8 text-center text-gray-500 text-sm">
+            <p>Built with Pixi.js & PeerJS. All game logic runs in your browser. No server code required.</p>
+        </footer>
+    </div>
+
+    <!-- ============================ -->
+    <!-- GAME JAVASCRIPT (Embedded) -->
+    <!-- ============================ -->
+    <script>
+        // ============================================================================
+        // CONFIGURATION & CONSTANTS
+        // ============================================================================
+        const CONFIG = {
+            CANVAS_WIDTH: 1000,
+            CANVAS_HEIGHT: 600,
+            PLAYER_SPEED: 5,
+            JUMP_FORCE: -12,
+            GRAVITY: 0.6,
+            PROJECTILE_SPEED: 10,
+            PROJECTILE_DAMAGE: 25,
+            ENEMY_SPEED: 2,
+            ENEMY_DAMAGE: 10,
+            ENEMY_HP_BASE: 50,
+            WAVE_ENEMY_INCREMENT: 2,
+            XP_PER_KILL: 30,
+            XP_TO_LEVEL: 100,
+            LEVEL_HP_BONUS: 20,
+            NETWORK_UPDATE_RATE: 100 // ms between network syncs
+        };
+
+        // ============================================================================
+        // GAME STATE VARIABLES
+        // ============================================================================
+        let app, player, otherPlayer, enemies = [], projectiles = [], particles = [];
+        let keys = {}, mouse = { x: 0, y: 0, down: false };
+        let gameStarted = false, gameOver = false;
+        let wave = 1, enemiesAlive = 0, playerXP = 0, playerLevel = 1;
+        let peer, conn, peerId, hostId, isHost = false;
+        let lastNetworkUpdate = 0;
+        let playerName = `Hero${Math.floor(Math.random() * 1000)}`;
+
+        // Sprite textures (using placeholder CDN images)
+        const TEXTURES = {
+            player: "https://i.imgur.com/6Q7zQ7c.png",    // Simple knight sprite
+            enemy: "https://i.imgur.com/8n5LQ0p.png",     // Simple slime sprite
+            projectile: "https://i.imgur.com/9p9q9q9.png", // Fireball
+            platform: "https://i.imgur.com/4J4J4J4.png"   // Ground tile
+        };
+
+        // ============================================================================
+        // PEERJS NETWORKING SETUP
+        // ============================================================================
+        function initNetwork() {
+            // Generate a peer ID based on room code and random suffix
+            const roomCode = $('#roomCodeInput').val().trim().toLowerCase();
+            peerId = `dungeon-${roomCode}-${Math.random().toString(36).substr(2, 4)}`;
+            peer = new Peer(peerId, { debug: 2 });
+
+            peer.on('open', (id) => {
+                console.log('PeerJS connected with ID:', id);
+                $('#statusText').text(`Connected as ${id.substring(0, 8)}...`);
+                $('#roomStatus').removeClass('hidden');
+
+                // If we are the first peer (creator), we become the host
+                if ($('#createRoomBtn').data('creator')) {
+                    isHost = true;
+                    hostId = id;
+                    $('#peerRole').text('Host').addClass('text-green-400');
+                    startGame();
+                } else {
+                    // Otherwise, try to connect to the host (room code is the host's peer ID prefix)
+                    hostId = `dungeon-${roomCode}-host`;
+                    conn = peer.connect(hostId, { reliable: true });
+                    setupConnection(conn);
+                }
+            });
+
+            peer.on('connection', (connection) => {
+                console.log('Another player connected to us!');
+                conn = connection;
+                setupConnection(conn);
+                // If we are host and receive a connection, start game (if not already)
+                if (isHost && !gameStarted) startGame();
+            });
+
+            peer.on('error', (err) => {
+                console.error('PeerJS error:', err);
+                $('#statusText').text(`Error: ${err.type}`).addClass('text-red-400');
+            });
+        }
+
+        function setupConnection(connection) {
+            connection.on('open', () => {
+                console.log('Data connection open');
+                $('#statusText').text('Connected to another player!').addClass('text-green-400');
+                $('#playerCount').text('2/2');
+                // Send our initial player data
+                sendNetworkMessage('PLAYER_JOINED', {
+                    id: peerId, name: playerName, x: player?.x || 100, y: player?.y || 100,
+                    health: player?.health || 100, maxHealth: player?.maxHealth || 100, level: playerLevel
+                });
+            });
+
+            connection.on('data', (data) => {
+                handleNetworkMessage(data.type, data.payload);
+            });
+
+            connection.on('close', () => {
+                $('#statusText').text('Other player disconnected.').addClass('text-red-400');
+                $('#playerCount').text('1/2');
+                if (otherPlayer) otherPlayer.destroy();
+                otherPlayer = null;
+            });
+        }
+
+        function sendNetworkMessage(type, payload) {
+            if (conn && conn.open) {
+                conn.send({ type, payload, sender: peerId, timestamp: Date.now() });
+            }
+        }
+
+        function handleNetworkMessage(type, payload) {
+            switch (type) {
+                case 'PLAYER_JOINED':
+                    if (payload.id !== peerId) {
+                        createOtherPlayer(payload);
+                    }
+                    break;
+                case 'PLAYER_STATE':
+                    updateOtherPlayer(payload);
+                    break;
+                case 'PLAYER_ATTACK':
+                    if (otherPlayer && payload.id === otherPlayer.id) {
+                        createNetworkProjectile(payload);
+                    }
+                    break;
+                case 'WORLD_STATE':
+                    if (!isHost) {
+                        syncWorldState(payload);
+                    }
+                    break;
+                case 'ENEMY_DAMAGED':
+                    if (!isHost) {
+                        applyEnemyDamage(payload.enemyId, payload.damage);
+                    }
+                    break;
+            }
+        }
+
+        // ============================================================================
+        // PIXI.JS GAME INITIALIZATION
+        // ============================================================================
+        function initGame() {
+            app = new PIXI.Application({
+                width: CONFIG.CANVAS_WIDTH,
+                height: CONFIG.CANVAS_HEIGHT,
+                view: document.getElementById('gameCanvas'),
+                backgroundColor: 0x0a0a1a,
+                antialias: true
+            });
+
+            // Load textures
+            const loader = PIXI.Loader.shared;
+            loader.add('player', TEXTURES.player)
+                  .add('enemy', TEXTURES.enemy)
+                  .add('projectile', TEXTURES.projectile)
+                  .add('platform', TEXTURES.platform);
+            loader.load(setupScene);
+            loader.onError.add((err) => console.error('Texture load error:', err));
+        }
+
+        function setupScene() {
+            // Create ground platform
+            const platform = new PIXI.Sprite(PIXI.Texture.from('platform'));
+            platform.width = CONFIG.CANVAS_WIDTH;
+            platform.height = 60;
+            platform.y = CONFIG.CANVAS_HEIGHT - 60;
+            platform.tint = 0x4a5568;
+            app.stage.addChild(platform);
+
+            // Create player sprite
+            player = new PIXI.Sprite(PIXI.Texture.from('player'));
+            player.anchor.set(0.5);
+            player.x = 200;
+            player.y = CONFIG.CANVAS_HEIGHT - 150;
+            player.vx = 0;
+            player.vy = 0;
+            player.health = 100;
+            player.maxHealth = 100;
+            player.level = 1;
+            player.facing = 'right';
+            player.state = 'idle';
+            player.id = peerId;
+            player.name = playerName;
+            app.stage.addChild(player);
+
+            // Health bar for player
+            player.healthBar = new PIXI.Graphics();
+            player.addChild(player.healthBar);
+            updateHealthBar(player);
+
+            // Start game loop
+            app.ticker.add(gameLoop);
+            gameStarted = true;
+            $('#gameContainer').show();
+            $('#currentRoomCode').text($('#roomCodeInput').val());
+            spawnWave();
+        }
+
+        // ============================================================================
+        // GAME LOOP
+        // ============================================================================
+        function gameLoop(delta) {
+            if (!gameStarted || gameOver) return;
+
+            const now = Date.now();
+            handleInput();
+            applyPhysics();
+            updatePlayer();
+            updateEnemies();
+            updateProjectiles();
+            updateParticles();
+            checkCollisions();
+            updateUI();
+
+            // Network sync: host sends world state, all send player state
+            if (now - lastNetworkUpdate > CONFIG.NETWORK_UPDATE_RATE) {
+                if (isHost) {
+                    sendWorldState();
+                }
+                sendPlayerState();
+                lastNetworkUpdate = now;
+            }
+        }
+
+        // ============================================================================
+        // INPUT HANDLING
+        // ============================================================================
+        function handleInput() {
+            // Movement
+            player.vx = 0;
+            if (keys['ArrowLeft'] || keys['KeyA']) {
+                player.vx = -CONFIG.PLAYER_SPEED;
+                player.facing = 'left';
+                player.state = 'running';
+            }
+            if (keys['ArrowRight'] || keys['KeyD']) {
+                player.vx = CONFIG.PLAYER_SPEED;
+                player.facing = 'right';
+                player.state = 'running';
+            }
+            if (!keys['ArrowLeft'] && !keys['ArrowRight'] && !keys['KeyA'] && !keys['KeyD']) {
+                player.state = 'idle';
+            }
+
+            // Jump
+            if ((keys['Space'] || keys['KeyW']) && player.y >= CONFIG.CANVAS_HEIGHT - 150) {
+                player.vy = CONFIG.JUMP_FORCE;
+                createParticles(player.x, player.y + 20, 0x00ffaa, 5);
+            }
+
+            // Attack (J key or mouse click)
+            if (keys['KeyJ'] || mouse.down) {
+                performAttack();
+            }
+        }
+
+        function performAttack() {
+            // Cooldown check
+            if (player.lastAttack && Date.now() - player.lastAttack < 300) return;
+            player.lastAttack = Date.now();
+
+            // Create projectile
+            const proj = new PIXI.Sprite(PIXI.Texture.from('projectile'));
+            proj.anchor.set(0.5);
+            proj.x = player.x;
+            proj.y = player.y;
+            proj.vx = (player.facing === 'right' ? 1 : -1) * CONFIG.PROJECTILE_SPEED;
+            proj.vy = 0;
+            proj.damage = CONFIG.PROJECTILE_DAMAGE;
+            proj.owner = player.id;
+            app.stage.addChild(proj);
+            projectiles.push(proj);
+
+            // Visual effect
+            createParticles(player.x, player.y, 0xffaa00, 8);
+            // Sound effect placeholder (using Howler if needed)
+            // new Howl({ src: ['https://assets.mixkit.co/sfx/preview/mixkit-laser-shot-1675.mp3'] }).play();
+
+            // Network broadcast
+            sendNetworkMessage('PLAYER_ATTACK', {
+                id: player.id,
+                x: proj.x, y: proj.y,
+                vx: proj.vx, vy: proj.vy
+            });
+        }
+
+        // ============================================================================
+        // PHYSICS & UPDATES
+        // ============================================================================
+        function applyPhysics() {
+            // Player gravity
+            player.vy += CONFIG.GRAVITY;
+            player.x += player.vx;
+            player.y += player.vy;
+
+            // Boundary checks
+            player.x = Math.max(30, Math.min(CONFIG.CANVAS_WIDTH - 30, player.x));
+            if (player.y > CONFIG.CANVAS_HEIGHT - 150) {
+                player.y = CONFIG.CANVAS_HEIGHT - 150;
+                player.vy = 0;
+            }
+        }
+
+        function updatePlayer() {
+            // Simple animation based on state
+            if (player.state === 'running') {
+                player.scale.x = player.facing === 'right' ? 1 : -1;
+            }
+        }
+
+        function updateEnemies() {
+            if (!isHost) return; // Only host updates enemy logic
+
+            for (let e of enemies) {
+                // Chase nearest player
+                const target = otherPlayer && otherPlayer.x ? otherPlayer : player;
+                const dx = target.x - e.x;
+                const dy = target.y - e.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist > 5) {
+                    e.vx = (dx / dist) * CONFIG.ENEMY_SPEED;
+                    e.vy = (dy / dist) * CONFIG.ENEMY_SPEED;
+                }
+                e.x += e.vx;
+                e.y += e.vy;
+
+                // Update health bar
+                updateHealthBar(e);
+            }
+        }
+
+        function updateProjectiles() {
+            for (let i = projectiles.length - 1; i >= 0; i--) {
+                const p = projectiles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+
+                // Remove if off-screen
+                if (p.x < -50 || p.x > CONFIG.CANVAS_WIDTH + 50 || p.y < -50 || p.y > CONFIG.CANVAS_HEIGHT + 50) {
+                    p.destroy();
+                    projectiles.splice(i, 1);
+                }
+            }
+        }
+
+        function updateParticles() {
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.alpha -= 0.02;
+                if (p.alpha <= 0) {
+                    p.destroy();
+                    particles.splice(i, 1);
+                }
+            }
+        }
+
+        // ============================================================================
+        // COLLISION DETECTION
+        // ============================================================================
+        function checkCollisions() {
+            // Projectile vs Enemy
+            for (let i = projectiles.length - 1; i >= 0; i--) {
+                const proj = projectiles[i];
+                for (let j = enemies.length - 1; j >= 0; j--) {
+                    const enemy = enemies[j];
+                    if (circleRectCollision(proj, enemy)) {
+                        // Damage enemy
+                        enemy.health -= proj.damage;
+                        createParticles(enemy.x, enemy.y, 0xff0000, 6);
+                        if (enemy.health <= 0) {
+                            // Enemy died
+                            enemy.destroy();
+                            enemies.splice(j, 1);
+                            enemiesAlive--;
+                            grantXP(CONFIG.XP_PER_KILL);
+                            // Check wave end
+                            if (enemiesAlive === 0) {
+                                setTimeout(() => nextWave(), 1500);
+                            }
+                        }
+                        // Remove projectile
+                        proj.destroy();
+                        projectiles.splice(i, 1);
+                        // Network sync (host tells client)
+                        if (isHost) {
+                            sendNetworkMessage('ENEMY_DAMAGED', { enemyId: enemy.id, damage: proj.damage });
+                        }
+                        break;
+                    }
+                }
+            }
+
+            // Enemy vs Player
+            for (let e of enemies) {
+                if (circleRectCollision(e, player)) {
+                    player.health -= CONFIG.ENEMY_DAMAGE * 0.1; // Reduce damage for multiplayer fairness
+                    player.tint = 0xff8888;
+                    setTimeout(() => player.tint = 0xffffff, 200);
+                    if (player.health <= 0) {
+                        gameOver = true;
+                        showGameOver('You were defeated!');
+                    }
+                }
+            }
+        }
+
+        function circleRectCollision(circle, rect) {
+            const distX = Math.abs(circle.x - rect.x);
+            const distY = Math.abs(circle.y - rect.y);
+            return (distX < (rect.width / 2 + circle.width / 2) &&
+                    distY < (rect.height / 2 + circle.height / 2));
+        }
+
+        // ============================================================================
+        // WAVE & PROGRESSION SYSTEM
+        // ============================================================================
+        function spawnWave() {
+            const count = wave * CONFIG.WAVE_ENEMY_INCREMENT;
+            enemiesAlive = count;
+            for (let i = 0; i < count; i++) {
+                const enemy = new PIXI.Sprite(PIXI.Texture.from('enemy'));
+                enemy.anchor.set(0.5);
+                enemy.x = Math.random() * (CONFIG.CANVAS_WIDTH - 200) + 100;
+                enemy.y = 100;
+                enemy.vx = 0;
+                enemy.vy = 0;
+                enemy.health = CONFIG.ENEMY_HP_BASE + (wave * 10);
+                enemy.maxHealth = enemy.health;
+                enemy.id = `enemy-${wave}-${i}`;
+                enemy.tint = 0xaa55ff; // Purple tint for enemies
+                app.stage.addChild(enemy);
+
+                // Health bar
+                enemy.healthBar = new PIXI.Graphics();
+                enemy.addChild(enemy.healthBar);
+                updateHealthBar(enemy);
+
+                enemies.push(enemy);
+            }
+            $('#waveCount').text(wave);
+            $('#enemyCount').text(enemiesAlive);
+        }
+
+        function nextWave() {
+            wave++;
+            $('#waveCount').text(wave);
+            spawnWave();
+        }
+
+        function grantXP(amount) {
+            playerXP += amount;
+            while (playerXP >= CONFIG.XP_TO_LEVEL) {
+                playerXP -= CONFIG.XP_TO_LEVEL;
+                playerLevel++;
+                player.maxHealth += CONFIG.LEVEL_HP_BONUS;
+                player.health = player.maxHealth;
+                $('#levelDisplay').text(playerLevel);
+                createParticles(player.x, player.y, 0x00ffff, 12); // Level-up effect
+            }
+        }
+
+        // ============================================================================
+        // UI & HELPER FUNCTIONS
+        // ============================================================================
+        function updateUI() {
+            $('#healthDisplay').text(Math.ceil(player.health));
+            $('#maxHealthDisplay').text(player.maxHealth);
+            $('#enemyCount').text(enemiesAlive);
+        }
+
+        function updateHealthBar(sprite) {
+            const bar = sprite.healthBar;
+            bar.clear();
+            const width = 40;
+            const height = 6;
+            const healthRatio = sprite.health / sprite.maxHealth;
+            // Background
+            bar.beginFill(0x000000, 0.5);
+            bar.drawRect(-width / 2, -sprite.height / 2 - 10, width, height);
+            // Health fill
+            bar.beginFill(healthRatio > 0.5 ? 0x00ff00 : healthRatio > 0.25 ? 0xffff00 : 0xff0000);
+            bar.drawRect(-width / 2, -sprite.height / 2 - 10, width * healthRatio, height);
+            bar.endFill();
+        }
+
+        function createParticles(x, y, color, count) {
+            for (let i = 0; i < count; i++) {
+                const p = new PIXI.Graphics();
+                p.beginFill(color);
+                p.drawCircle(0, 0, Math.random() * 3 + 1);
+                p.endFill();
+                p.x = x;
+                p.y = y;
+                p.vx = (Math.random() - 0.5) * 4;
+                p.vy = (Math.random() - 0.5) * 4;
+                p.alpha = 1;
+                app.stage.addChild(p);
+                particles.push(p);
+            }
+        }
+
+        function showGameOver(message) {
+            $('#overlayTitle').text(gameOver ? 'Game Over' : 'Wave Cleared!');
+            $('#overlayMessage').text(message);
+            $('#gameOverlay').removeClass('hidden');
+        }
+
+        // ============================================================================
+        // MULTIPLAYER SPECIFIC FUNCTIONS
+        // ============================================================================
+        function createOtherPlayer(data) {
+            otherPlayer = new PIXI.Sprite(PIXI.Texture.from('player'));
+            otherPlayer.anchor.set(0.5);
+            otherPlayer.x = data.x;
+            otherPlayer.y = data.y;
+            otherPlayer.health = data.health;
+            otherPlayer.maxHealth = data.maxHealth;
+            otherPlayer.level = data.level;
+            otherPlayer.id = data.id;
+            otherPlayer.name = data.name;
+            otherPlayer.tint = 0x88ff88; // Green tint for other player
+            app.stage.addChild(otherPlayer);
+
+            // Health bar
+            otherPlayer.healthBar = new PIXI.Graphics();
+            otherPlayer.addChild(otherPlayer.healthBar);
+            updateHealthBar(otherPlayer);
+        }
+
+        function updateOtherPlayer(data) {
+            if (!otherPlayer) return;
+            otherPlayer.x = data.x;
+            otherPlayer.y = data.y;
+            otherPlayer.health = data.health;
+            otherPlayer.maxHealth = data.maxHealth;
+            otherPlayer.level = data.level;
+            otherPlayer.facing = data.facing;
+            otherPlayer.scale.x = otherPlayer.facing === 'right' ? 1 : -1;
+            updateHealthBar(otherPlayer);
+        }
+
+        function createNetworkProjectile(data) {
+            const proj = new PIXI.Sprite(PIXI.Texture.from('projectile'));
+            proj.anchor.set(0.5);
+            proj.x = data.x;
+            proj.y = data.y;
+            proj.vx = data.vx;
+            proj.vy = data.vy;
+            proj.tint = 0x88ff88; // Green tint for other player's projectiles
+            app.stage.addChild(proj);
+            projectiles.push(proj);
+        }
+
+        function sendPlayerState() {
+            if (!conn || !conn.open) return;
+            sendNetworkMessage('PLAYER_STATE', {
+                id: player.id,
+                x: player.x, y: player.y,
+                health: player.health, maxHealth: player.maxHealth,
+                level: playerLevel, facing: player.facing
+            });
+        }
+
+        function sendWorldState() {
+            if (!conn || !conn.open) return;
+            const world = {
+                wave: wave,
+                enemies: enemies.map(e => ({
+                    id: e.id, x: e.x, y: e.y,
+                    health: e.health, maxHealth: e.maxHealth
+                }))
+            };
+            sendNetworkMessage('WORLD_STATE', world);
+        }
+
+        function syncWorldState(data) {
+            wave = data.wave;
+            $('#waveCount').text(wave);
+            // Sync enemies (simplified: remove all, recreate)
+            enemies.forEach(e => e.destroy());
+            enemies = [];
+            enemiesAlive = data.enemies.length;
+            data.enemies.forEach(eData => {
+                const enemy = new PIXI.Sprite(PIXI.Texture.from('enemy'));
+                enemy.anchor.set(0.5);
+                enemy.x = eData.x;
+                enemy.y = eData.y;
+                enemy.health = eData.health;
+                enemy.maxHealth = eData.maxHealth;
+                enemy.id = eData.id;
+                enemy.tint = 0xaa55ff;
+                app.stage.addChild(enemy);
+                enemy.healthBar = new PIXI.Graphics();
+                enemy.addChild(enemy.healthBar);
+                updateHealthBar(enemy);
+                enemies.push(enemy);
+            });
+            $('#enemyCount').text(enemiesAlive);
+        }
+
+        function applyEnemyDamage(enemyId, damage) {
+            const enemy = enemies.find(e => e.id === enemyId);
+            if (enemy) {
+                enemy.health -= damage;
+                createParticles(enemy.x, enemy.y, 0xff0000, 6);
+                if (enemy.health <= 0) {
+                    enemy.destroy();
+                    enemies = enemies.filter(e => e.id !== enemyId);
+                    enemiesAlive--;
+                    if (enemiesAlive === 0) {
+                        setTimeout(() => nextWave(), 1500);
+                    }
+                }
+            }
+        }
+
+        // ============================================================================
+        // START GAME
+        // ============================================================================
+        function startGame() {
+            initGame();
+            gameStarted = true;
+            gameOver = false;
+            $('#roomUI').hide();
+            $('#gameContainer').show();
+            // Start network sync if host
+            if (isHost) {
+                spawnWave();
+            }
+        }
+
+        // ============================================================================
+        // EVENT LISTENERS
+        // ============================================================================
+        $(document).ready(() => {
+            // Room buttons
+            $('#joinRoomBtn').click(() => {
+                $('#createRoomBtn').data('creator', false);
+                initNetwork();
+            });
+            $('#createRoomBtn').click(() => {
+                $('#createRoomBtn').data('creator', true);
+                initNetwork();
+            });
+
+            // Restart button
+            $('#restartBtn').click(() => {
+                location.reload();
+            });
+
+            // Keyboard input
+            $(document).on('keydown', (e) => {
+                keys[e.code] = true;
+                // Prevent spacebar scrolling
+                if (e.code === 'Space') e.preventDefault();
+            });
+            $(document).on('keyup', (e) => {
+                keys[e.code] = false;
+            });
+
+            // Mouse input
+            $('#gameCanvas').on('mousedown touchstart', (e) => {
+                mouse.down = true;
+                e.preventDefault();
+            });
+            $('#gameCanvas').on('mouseup touchend', () => {
+                mouse.down = false;
+            });
+            $('#gameCanvas').on('mousemove touchmove', (e) => {
+                const rect = app.view.getBoundingClientRect();
+                mouse.x = e.clientX - rect.left;
+                mouse.y = e.clientY - rect.top;
+            });
+
+            // Prevent context menu on canvas
+            $('#gameCanvas').on('contextmenu', (e) => e.preventDefault());
+        });
+    </script>
+</body>
+</html>
