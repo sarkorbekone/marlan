@@ -1,11 +1,55 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=, initial-scale=1.0">
-    <title>Document</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Game Hub</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body {
+      background: linear-gradient(135deg, #0f172a, #1e3a8a);
+      font-family: 'Inter', sans-serif;
+    }
+    .glass {
+      backdrop-filter: blur(10px);
+      background-color: rgba(15, 23, 42, 0.5);
+      border-radius: 1rem;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    .btn-glass {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      backdrop-filter: blur(5px);
+      transition: all 0.3s ease;
+    }
+    .btn-glass:hover {
+      background: rgba(255, 255, 255, 0.15);
+      scale: 1.05;
+    }
+  </style>
 </head>
-<body>
+<body class="flex items-center justify-center min-h-screen text-white">
+  <div class="glass p-10 flex flex-col items-center gap-6 shadow-lg max-w-md w-full">
+    <h1 class="text-4xl font-bold mb-4 text-center">🎮 Game Hub</h1>
     
+    <!-- Game 1 Button -->
+    <a href="index.html" class="btn-glass w-full text-center py-4 rounded-lg text-xl font-semibold hover:text-yellow-400">
+      Play Game 1
+    </a>
+    
+    <!-- Game 2 Button -->
+    <a href="index2.html" class="btn-glass w-full text-center py-4 rounded-lg text-xl font-semibold hover:text-yellow-400">
+      Play Game 2
+    </a>
+    
+    <!-- Buy Me a Coffee -->
+    <a href="https://www.buymeacoffee.com/yourusername" target="_blank" 
+       class="btn-glass w-full text-center py-3 rounded-lg text-lg font-medium text-yellow-300 hover:text-white">
+      ☕ Buy Me a Coffee
+    </a>
+    
+    <p class="text-gray-300 text-center mt-4 text-sm">Enjoy our games! 🌟</p>
+  </div>
 </body>
 </html>
